@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Kỷ niệm của chúng ta</title>
+  <style>
+    :root{--bg:#fff7fb;--card:#fff;--accent:#ff4b70;--muted:#666}
+    body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto; background:linear-gradient(180deg,#fff,#fff7fb); color:#222;padding:24px}
+    .container{max-width:1100px;margin:0 auto}
+    h1{color:var(--accent);text-align:center}
+    .controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:center;margin-bottom:18px}
+    select,input[type="text"]{padding:10px;border-radius:8px;border:1px solid #eee}
+    .card{background:var(--card);padding:14px;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.06)}
+    .uploader{display:flex;gap:12px;flex-direction:column;max-width:700px;margin:10px auto}
+    .btn{background:var(--accent);color:#fff;padding:10px 12px;border-radius:10px;border:none;cursor:pointer;font-weight:700}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:18px;margin-top:20px}
+    .polaroid{background:#fff;padding:12px;border-radius:10px;position:relative;box-shadow:0 12px 30px rgba(0,0,0,0.12);transform:rotate(var(--r));}
+    .polaroid img{width:100%;height:180px;object-fit:cover;border-radius:8px}
+    .polaroid .meta{padding:8px 6px}
+    .small{font-size:13px;color:var(--muted)}
+    .center{text-align:center}
+    .note{font-size:13px;color:var(--muted);text-align:center;margin-top:6px}
+    .thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+    .thumbs img{width:80px;height:80px;object-fit:cover;border-radius:8px}
+    form.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:center}
+    @media(max-width:700px){.polaroid img{height:150px}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Kỷ niệm của chúng ta ❤️</h1>
+
+    <div class="controls card" style="margin-top:16px">
+      <div>
+        <label class="small">Chọn năm</label><br/>
+        <select id="yearSelect"></select>
+      </div>
+
+      <div>
+        <label class="small">Thêm năm mới</label><br/>
+        <input id="newYear" type="text" placeholder="Ví dụ: 2025" />
+        <button class="btn" id="addYearBtn">Thêm</button>
+      </div>
+
+      <div style="flex:1"></div>
+
+      <div class="center">
+        <button class="btn" id="refreshBtn">Làm mới</button>
+      </div>
+    </div>
+
+    <div class="card uploader">
+      <form id="uploadForm" class="row">
+        <input id="textDesc" type="text" placeholder="Viết vài lời về kỷ niệm này..." style="flex:1" />
+        <input id="fileInput" type="file" accept="image/*" multiple />
+        <button class="btn" type="submit">Upload & Lưu</button>
+      </form>
+      <div class="note">Bạn có thể chọn nhiều ảnh (tối đa 8 tấm / lần). Ảnh sẽ lên Cloudinary và tự động lưu vào năm đã chọn.</div>
+      <div class="thumbs" id="thumbs"></div>
+    </div>
+
+    <div id="gallery" class="grid"></div>
+
+  </div>
+
+<script>
+  const yearSelect = document.getElementById('yearSelect');
+  const newYearInput = document.getElementById('newYear');
+  const addYearBtn = document.getElementById('addYearBtn');
+  const refreshBtn = document.getElementById('refreshBtn');
+  const uploadForm = document.getElementById('uploadForm');
+  const fileInput = document.getElementById('fileInput');
+  const textDesc = document.getElementById('textDesc');
+  const thumbs = document.getElementById('thumbs');
+  const gallery = document.getElementById('gallery');
+
+  // helper
+  function el(tag, attrs={}, html=''){ const e=document.createElement(tag); for(const k in attrs) e.setAttribute(k, attrs[k]); e.innerHTML = html; return e; }
+
+  async function loadYears(){
+    const res = await fetch('/api/years');
+    const j = await res.json();
+    yearSelect.innerHTML = '';
+    if(j.years.length === 0){
+      const y = new Date().getFullYear();
+      addYear(y);
+      yearSelect.value = y;
+      return;
+    }
+    j.years.forEach(y => {
+      const opt = document.createElement('option'); opt.value = y; opt.textContent = y; yearSelect.appendChild(opt);
+    });
+    loadGalleryFor(yearSelect.value);
+  }
+
+  async function addYear(y){
+    // create empty year by saving empty array
+    if(!y) return;
+    // simple POST to create empty entry
+    await fetch('/api/memories/' + y, {
+      method: 'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ text: 'Mở đầu cho năm ' + y, images: [], date: new Date().toISOString().slice(0,10) })
+    });
+    await loadYears();
+  }
+
+  addYearBtn.addEventListener('click', async ()=>{
+    const y = newYearInput.value.trim();
+    if(!y) return alert('Nhập năm hợp lệ');
+    await addYear(y);
+    newYearInput.value = '';
+  });
+
+  refreshBtn.addEventListener('click', ()=> loadYears());
+
+  fileInput.addEventListener('change', ()=>{
+    thumbs.innerHTML = '';
+    const files = Array.from(fileInput.files);
+    files.forEach(f => {
+      const url = URL.createObjectURL(f);
+      const img = document.createElement('img'); img.src = url;
+      thumbs.appendChild(img);
+    });
+  });
+
+  uploadForm.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const files = fileInput.files;
+    if(!files || files.length === 0) return alert('Chọn ảnh để upload');
+    const fd = new FormData();
+    for(const f of files) fd.append('photos', f);
+    // upload to /api/upload
+    const up = await fetch('/api/upload', { method: 'POST', body: fd });
+    const upj = await up.json();
+    if(!upj.ok) return alert('Upload lỗi: ' + (upj.error || ''));
+    const urls = upj.uploaded.map(i=>i.url);
+    // then save memory entry
+    const year = yearSelect.value || (new Date().getFullYear()).toString();
+    const text = textDesc.value;
+    const save = await fetch('/api/memories/' + year, {
+      method: 'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ text, images: urls, date: new Date().toISOString().slice(0,10) })
+    });
+    const saved = await save.json();
+    if(saved.ok) {
+      alert('Lưu kỷ niệm thành công!');
+      textDesc.value = '';
+      fileInput.value = '';
+      thumbs.innerHTML = '';
+      loadGalleryFor(year);
+    } else {
+      alert('Lưu thất bại');
+    }
+  });
+
+  async function loadGalleryFor(year){
+    gallery.innerHTML = '';
+    const res = await fetch('/api/memories/' + year);
+    const j = await res.json();
+    const items = j.items || [];
+    if(items.length === 0){
+      gallery.innerHTML = '<div class="note">Chưa có kỷ niệm cho năm này.</div>';
+      return;
+    }
+    // Shuffle slight rotation for polaroid effect
+    items.slice().reverse().forEach(it => {
+      it.images.forEach(img => {
+        const card = document.createElement('div');
+        card.className = 'polaroid';
+        card.style.setProperty('--r', (Math.random()*6 - 3) + 'deg');
+        card.innerHTML = `
+          <img src="${img}" alt="mem" />
+          <div class="meta">
+            <div class="small">${it.date}</div>
+            <div>${escapeHtml(it.text || '')}</div>
+          </div>
+        `;
+        gallery.appendChild(card);
+      });
+    });
+  }
+
+  function escapeHtml(s){ return (s+'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c])); }
+
+  // init
+  loadYears();
+</script>
+</body>
+</html>
